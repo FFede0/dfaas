@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from typing import Tuple
 from parse import parse
 import pandas as pd
+import json
 import os
 
 
@@ -15,7 +16,7 @@ def load_all_results(base_folder: str) -> Tuple[
   all_full_dataset_metrics = pd.DataFrame()
   all_exec_time = pd.DataFrame()
   for foldername in os.listdir(base_folder):
-    if foldername.startswith("OUTPUT_"):
+    if foldername.startswith("OUTPUT_") and os.path.exists(os.path.join(base_folder, foldername, "done")):
       day, hour = foldername.split("_")[1:]
       # parse results file
       results_filename = os.path.join(base_folder, foldername, "results.txt")
@@ -286,7 +287,7 @@ def train_test_split():
 
 
 if __name__ == "__main__":
-  base_folder = "/Users/federicafilippini/Documents/GitHub/FORKs/aMLLibrary/DFAAS"
+  base_folder = "/Users/federicafilippini/Documents/GitHub/FORKs/aMLLibrary/DFAAS/OUTPUT_GROUPS"
   targets = ["cpu", "ram", "power"]
   exp_types = ["NoAugmentation", "AugmentationAndSelection"]
   techniques = {
@@ -314,7 +315,7 @@ if __name__ == "__main__":
         all_exec_time
       ) = load_all_results(exp_folder)
       # add test metrics
-      test_mape = []
+      test_metrics = {}
       for technique, exp_day_hour in zip(
           all_full_dataset_metrics["technique"], 
           all_full_dataset_metrics["exp_day_hour"]
@@ -323,12 +324,17 @@ if __name__ == "__main__":
         technique_name = techniques[technique]
         with open(
             os.path.join(
-              exp_folder, f"PREDICT_{day}_{hour}", technique_name, "mape.txt"
+              exp_folder, f"PREDICT_{day}_{hour}", technique_name, "metrics.json"
             ), 
             "r"
           ) as istream:
-          test_mape.append(float(istream.readlines()[0]))
-      all_full_dataset_metrics["MAPE_test"] = test_mape
+          tm = json.load(istream)
+          for metric, value in tm.items():
+            if metric not in test_metrics:
+              test_metrics[metric] = []
+            test_metrics[metric].append(value)
+      for metric, values in test_metrics.items():
+        all_full_dataset_metrics[f"{metric}_test"] = values
       all_full_dataset_metrics["target"] = [target] * len(
         all_full_dataset_metrics
       )
