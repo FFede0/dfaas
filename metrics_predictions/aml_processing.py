@@ -235,7 +235,7 @@ def plot_predictions_and_mape(
     abs(predictions["real"] - predictions["pred"]) / predictions["real"]
   ) * 100
   # -- predictions
-  _, axs = plt.subplots(nrows = 1, ncols = 2, figsize = (12, 5))
+  _, axs = plt.subplots(nrows = 1, ncols = 3, figsize = (20, 5))
   predictions.plot.scatter(
     x = "real",
     y = "pred",
@@ -245,20 +245,33 @@ def plot_predictions_and_mape(
   p1 = max(predictions["pred"].max(), predictions["real"].max())
   p2 = min(predictions["pred"].min(), predictions["real"].min())
   axs[0].plot([p1, p2], [p1, p2], 'k--')
+  # -- residuals
+  predictions["real - pred"] = predictions["real"] - predictions["pred"]
+  predictions.plot.scatter(
+    x = "real",
+    y = "real - pred",
+    ax = axs[1],
+    grid = True
+  )
+  axs[1].axhline(
+    y = 0,
+    color = "k",
+    linestyle = "dashed"
+  )
   # -- MAPE
   mape.plot(
     grid = True, 
     marker = ".", 
     linewidth = 0.01, 
-    ax = axs[1]
+    ax = axs[2]
   )
-  axs[1].axhline(
+  axs[2].axhline(
     y = mape.mean(), 
     color = mcolors.TABLEAU_COLORS["tab:red"],
     linestyle = "dashed",
     linewidth = 2
   )
-  axs[1].set_ylabel("MAPE")
+  axs[2].set_ylabel("MAPE")
   if foldername is not None:
     plt.savefig(
       os.path.join(foldername, "predictions_and_mape.png"),
