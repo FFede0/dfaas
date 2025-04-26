@@ -5,6 +5,7 @@ import torch
 from typing import Tuple
 import pandas as pd
 import numpy as np
+import time
 
 
 class SumPoolingModel(nn.Module):
@@ -192,6 +193,38 @@ class JPModel(nn.Module):
 		return self.loss_func(predicted_output, output_tensor)
 
 
+def build_model(
+		input_dim: int, 
+		model: str, 
+		num_layers: int, 
+		num_neurons: int, 
+		learning_rate: float,
+		iteration: int,
+		batch_size: int
+	) -> nn.Module:
+	janossy_model = JPModel(
+		vocab_size = None, 
+		input_dim = input_dim,
+		model = model,
+		num_layers = num_layers,
+		num_neurons = num_neurons,
+		janossy_k = 1,
+		device = "cpu"
+	)
+	# use Adam Optimizer on all parameters with requires grad as true
+	optimizer = torch.optim.Adam(
+		filter(lambda p: p.requires_grad, janossy_model.parameters()), 
+		lr = learning_rate
+	)
+	# checkpoint
+	checkpoint_file_name = "{}_{}_{}_{}_{}_checkpoint.pth.tar".format(
+		model, num_layers, iteration, learning_rate, batch_size
+	)
+	return janossy_model, optimizer, checkpoint_file_name
+
+def permute(x):
+	return np.random.permutation(x)
+
 def prepare_data(all_data: pd.DataFrame) -> Tuple[torch.Tensor, dict]:
 	fname_to_pcomp = {
 		"curl": -2.371848,
@@ -216,7 +249,7 @@ def prepare_data(all_data: pd.DataFrame) -> Tuple[torch.Tensor, dict]:
 	targets.drop(to_drop, inplace = True)
 	node_types.drop(to_drop, inplace = True)
 	# build X/Y tensors
-	X_tensor = []
+	X_list = []
 	Y_dict = {key: [] for key in targets}
 	for idx in range(len(rates)):
 		rate = rates.iloc[idx]
@@ -225,89 +258,90 @@ def prepare_data(all_data: pd.DataFrame) -> Tuple[torch.Tensor, dict]:
 		# x
 		xtab = []
 		for key, r in rate.items():
-			fname = key.split("_")[-1]
-			xtab.append([fname_to_pcomp[fname], r, int(node_type)])
-		X_tensor.append(xtab)
+			if r > 0:
+				fname = key.split("_")[-1]
+				xtab.append([fname_to_pcomp[fname], r, int(node_type)])
+		X_list.append(xtab)
 		# y
 		for key, t in target.items():
 			Y_dict[key].append([t])
-	# convert type
-	X_tensor = torch.Tensor(np.array(X_tensor))
-	Y_dict = {k: torch.Tensor(np.array(v)) for k,v in Y_dict.items()}
-	return X_tensor, Y_dict
+	return X_list, Y_dict
 
 def unison_shuffled(a, b):
 	assert len(a) == len(b)
 	p = np.random.permutation(len(a))
 	return a[p], b[p]
 
-def permute(x):
-	return np.random.permutation(x)
+def to_tensor(l: list) -> torch.Tensor:
+	return torch.Tensor(np.array(l))
 
-
-# def train(
-# 		model: str,
-# 		num_layers: int,
-# 		iteration: int,
-# 		learning_rate: float,
-# 		batch_size: int
-# 	):
-# 	checkpoint_file_name = str(model) +"_" + str(num_layers) + "_" + "iteration" + str(iteration) + "_" + "learning_rate_" + str(learning_rate) + "_batch_size_" + str(batch_size) + "_checkpoint.pth.tar"
-# 	# Use Adam Optimizer on all parameters with requires grad as true
-# 	optimizer = torch.optim.Adam(
-# 		filter(lambda p: p.requires_grad, janossy_model.parameters()), 
-# 		lr=learning_rate
-# 	)
-# 	# Train over multiple epochs
-# 	start_time = time.time()
-# 	num_batches = int(NUM_TRAINING_EXAMPLES / batch_size)
-# 	best_val_accuracy = 0.0
-# 	for epoch in range(num_epochs):
-# 		# Do seed and random shuffle of the input
-# 		X, output_X = unison_shuffled(X, output_X)
-# 		#Performing pi-SGD for RNN's
-# 		if model in ['lstm','gru']:
-# 			X = np.apply_along_axis(permute, 1, X)
-# 		for batch in range(num_batches):
-# 			batch_seq = torch.LongTensor(X[batch_size * batch:batch_size * batch + batch_size]).to(device)
-# 			optimizer.zero_grad()
-# 			loss = janossy_model.loss(batch_seq, torch.FloatTensor(output_X[np.array(range(batch_size * batch, batch_size * batch + batch_size))]).to(device))
-# 			loss.backward()
-# 			optimizer.step()
-# 		with torch.no_grad():
-# 			val_output = np.round(janossy_model.forward(torch.LongTensor(V).to(device)).data.cpu().numpy())
-# 			val_loss = janossy_model.loss(torch.LongTensor(V).to(device),torch.FloatTensor(output_V).to(device))
-# 			val_correct = 0
-# 			for j in range(len(output_V)):
-# 				if output_V[j,0] == val_output[j,0]:
-# 					val_correct+=1
-# 			val_accuracy = (1.0*val_correct)/len(output_V)
-# 			if val_accuracy >= best_val_accuracy:
-# 				best_val_accuracy = val_accuracy
-# 				#Save Weights
-# 				torch.save(janossy_model.state_dict(),checkpoint_file_name)	
-# 		print(epoch, loss.data[0],val_loss.data[0])
-# 	end_time = time.time()
-# 	total_training_time = end_time - start_time
-# 	print("Total Training Time: ", total_training_time)
+def train(
+		janossy_model: nn.Module,
+		optimizer,
+		checkpoint_file_name: str,
+		batch_size: int,
+		num_batches: int,
+		num_epochs: int
+	):
+	device = "cpu"
+	# Train over multiple epochs
+	start_time = time.time()
+	best_val_accuracy = 0.0
+	for epoch in range(num_epochs):
+		# Do seed and random shuffle of the input
+		X, output_X = unison_shuffled(X, output_X)
+		#Performing pi-SGD for RNN's
+		if model in ['lstm','gru']:
+			X = np.apply_along_axis(permute, 1, X)
+		for batch in range(num_batches):
+			batch_seq = torch.LongTensor(X[batch_size * batch:batch_size * batch + batch_size]).to(device)
+			optimizer.zero_grad()
+			loss = janossy_model.loss(batch_seq, torch.FloatTensor(output_X[np.array(range(batch_size * batch, batch_size * batch + batch_size))]).to(device))
+			loss.backward()
+			optimizer.step()
+		with torch.no_grad():
+			val_output = np.round(janossy_model.forward(torch.LongTensor(V).to(device)).data.cpu().numpy())
+			val_loss = janossy_model.loss(torch.LongTensor(V).to(device),torch.FloatTensor(output_V).to(device))
+			val_correct = 0
+			for j in range(len(output_V)):
+				if output_V[j,0] == val_output[j,0]:
+					val_correct+=1
+			val_accuracy = (1.0*val_correct)/len(output_V)
+			if val_accuracy >= best_val_accuracy:
+				best_val_accuracy = val_accuracy
+				#Save Weights
+				torch.save(janossy_model.state_dict(),checkpoint_file_name)	
+		print(epoch, loss.data[0],val_loss.data[0])
+	end_time = time.time()
+	total_training_time = end_time - start_time
+	print("Total Training Time: ", total_training_time)
 
 
 all_data = pd.read_csv("output/output-energy/all_results_no_outliers_TRAIN.csv")
-X_train, Y_train_dict = prepare_data(all_data)
-
-xt = X_train[:10, :, :]
-yt = Y_train_dict["cpu_usage_node"][:10]
-xts, yts = unison_shuffled(xt, yt)
-
-SPmodel = SumPoolingModel(6, 3, "linear", 2, 30, "cpu")
-SPmodel.loss(xt, yt)
+X_train_list, Y_train_dict = prepare_data(all_data)
 
 
-model = JPModel(6, 3, "lstm", 3, 30, 2, "cpu")
-model.loss(xt,yt)
+idxs = {i: [] for i in range(1,7)}
+for i, val in enumerate(X_train_list):
+	idxs[len(val)].append(i)
 
 
-xt.shape
+xt1 = to_tensor(X_train_list[idxs[1][0]])
+yt1 = to_tensor(Y_train_dict["cpu_usage_node"][idxs[1][0]])
+xt2 = to_tensor(X_train_list[idxs[2][0]])
+yt2 = to_tensor(Y_train_dict["cpu_usage_node"][idxs[2][0]])
+xt3 = to_tensor(X_train_list[idxs[3][0]])
+yt3 = to_tensor(Y_train_dict["cpu_usage_node"][idxs[3][0]])
+
+xts1, yts2 = unison_shuffled(xt1, yt1)
+
+# SPmodel = SumPoolingModel(6, 3, "linear", 2, 30, "cpu")
+# SPmodel.loss(xt, yt)
+
+
+model = JPModel(6, 3, "lstm", 3, 30, 1, "cpu")
+model.loss(xt3,yt3)
+
 
 # vocab_size = 180
 # input_dim = 10
